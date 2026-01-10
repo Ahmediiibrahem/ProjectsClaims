@@ -3,167 +3,578 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>لوحة المطالبات - كونترول الكاش</title>
+  <title>لوحة كونترول الكاش - المطالبات</title>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Tahoma, Arial; margin: 24px; }
-    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-    input, select { padding:10px; border:1px solid #ccc; border-radius:10px; }
-    .card { border:1px solid #eee; border-radius:16px; padding:16px; box-shadow:0 2px 10px rgba(0,0,0,.05); }
-    table { width:100%; border-collapse:collapse; margin-top:12px; }
-    th, td { padding:10px; border-bottom:1px solid #eee; text-align:right; }
-    th { background:#fafafa; position:sticky; top:0; }
-    .pill { padding:4px 10px; border-radius:999px; font-size:12px; display:inline-block; }
-    .pending { background:#fff7e6; }
-    .transferred { background:#e8fff0; }
-    .dup { background:#ffe8e8; }
-    .muted { color:#666; font-size:13px; }
+    :root{
+      --bg:#ffffff;
+      --muted:#666;
+      --border:#eee;
+      --shadow:0 2px 14px rgba(0,0,0,.06);
+      --card:#fff;
+      --warn:#ffe8e8;
+      --ok:#e8fff0;
+      --pend:#fff7e6;
+    }
+    body { font-family: system-ui, -apple-system, Segoe UI, Tahoma, Arial; margin: 22px; background:var(--bg); color:#111; }
+    h1 { margin: 0 0 6px; font-size: 22px; }
+    .muted { color:var(--muted); font-size:13px; }
+    .grid { display:grid; gap:12px; }
+    .grid.kpi { grid-template-columns: repeat(4, minmax(180px, 1fr)); }
+    @media (max-width: 950px){ .grid.kpi { grid-template-columns: repeat(2, minmax(180px, 1fr)); } }
+    @media (max-width: 520px){ .grid.kpi { grid-template-columns: 1fr; } }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:14px 14px; box-shadow: var(--shadow); }
+    .kpi .value { font-size: 22px; font-weight: 700; margin-top: 6px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    input, select { padding:10px 12px; border:1px solid #ccc; border-radius:12px; font-size:14px; background:#fff; }
+    label { display:flex; gap:8px; align-items:center; }
+    .pill { padding:4px 10px; border-radius:999px; font-size:12px; display:inline-block; border:1px solid var(--border); }
+    .pill.paid { background: var(--ok); }
+    .pill.pending { background: var(--pend); }
+    .pill.partial { background:#eef3ff; }
+    .pill.dup { background: var(--warn); border-color:#ffb3b3; }
+    .layout { display:grid; gap:12px; grid-template-columns: 360px 1fr; align-items:start; margin-top:12px; }
+    @media (max-width: 1100px){ .layout { grid-template-columns: 1fr; } }
+    .totals-list { max-height: 60vh; overflow:auto; }
+    .totals-item { display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border); gap:10px; }
+    .totals-item b { white-space:nowrap; }
+    table { width:100%; border-collapse:collapse; margin-top:10px; }
+    th, td { padding:10px; border-bottom:1px solid var(--border); text-align:right; vertical-align:top; }
+    th { background:#fafafa; position:sticky; top:0; z-index:1; }
+    .table-wrap { overflow:auto; max-height: 64vh; border:1px solid var(--border); border-radius:14px; }
+    tr.dup-row { background: #fff5f5; }
+    .hint { font-size:12px; color:var(--muted); margin-top:8px; line-height:1.4; }
+    .small { font-size:12px; color:var(--muted); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .footer { margin-top: 14px; }
+    .btn { cursor:pointer; border:1px solid #ccc; background:#fff; padding:10px 12px; border-radius:12px; font-size:14px; }
+    .btn:hover { background:#fafafa; }
   </style>
 </head>
 <body>
-  <h2>لوحة المطالبات (PoC)</h2>
-  <p class="muted">عرض إجمالي المطالبات لكل مشروع + اكتشاف التكرار لمنع التحويل مرتين.</p>
+  <h1>لوحة كونترول الكاش — المطالبات</h1>
+  <div class="muted">مصدر البيانات: <span class="mono">data.csv</span> — عرض إجماليات، حالات الصرف، واكتشاف التكرار لمنع التحويل مرتين.</div>
 
-  <div class="row card">
-    <label>بحث: <input id="q" placeholder="اسم مشروع / رقم مطالبة / مورد..." /></label>
-    <label>مشروع: <select id="project"></select></label>
-    <label>حالة: 
-      <select id="status">
-        <option value="">الكل</option>
-        <option value="Pending">Pending</option>
-        <option value="Transferred">Transferred</option>
-      </select>
-    </label>
-    <label><input type="checkbox" id="onlyDup" /> إظهار المكرر فقط</label>
+  <div class="grid kpi" style="margin-top:12px;">
+    <div class="card kpi">
+      <div class="muted">إجمالي المطالبات (Total)</div>
+      <div class="value" id="kpi_total">—</div>
+      <div class="small" id="kpi_total_count">—</div>
+    </div>
+    <div class="card kpi">
+      <div class="muted">إجمالي المتبقي (Pending/Remaining)</div>
+      <div class="value" id="kpi_remaining">—</div>
+      <div class="small" id="kpi_pending_count">—</div>
+    </div>
+    <div class="card kpi">
+      <div class="muted">إجمالي المنصرف (Paid)</div>
+      <div class="value" id="kpi_paid">—</div>
+      <div class="small" id="kpi_paid_count">—</div>
+    </div>
+    <div class="card kpi">
+      <div class="muted">مشتبه تكرار (Duplicates)</div>
+      <div class="value" id="kpi_dups">—</div>
+      <div class="small" id="kpi_dups_count">—</div>
+    </div>
   </div>
 
-  <div class="row" style="margin-top:16px;">
-    <div class="card" style="flex:1; min-width:260px;">
-      <h3>إجمالي حسب المشروع</h3>
-      <div id="totals"></div>
+  <div class="card" style="margin-top:12px;">
+    <div class="row">
+      <label>بحث:
+        <input id="q" placeholder="مشروع / مورد / رقم طلب / IBAN..." style="min-width:260px" />
+      </label>
+
+      <label>مشروع:
+        <select id="project"></select>
+      </label>
+
+      <label>حالة:
+        <select id="status">
+          <option value="">الكل</option>
+          <option value="Pending">Pending</option>
+          <option value="Partially Paid">Partially Paid</option>
+          <option value="Paid">Paid</option>
+          <option value="Canceled">Canceled</option>
+        </select>
+      </label>
+
+      <label><input type="checkbox" id="onlyDup" /> إظهار المكرر فقط</label>
+      <button class="btn" id="exportBtn" title="تصدير الجدول الحالي CSV">تصدير النتائج CSV</button>
     </div>
 
-    <div class="card" style="flex:2; min-width:320px;">
-      <h3>تفاصيل المطالبات</h3>
-      <div class="muted" id="meta"></div>
-      <div style="overflow:auto; max-height:60vh;">
+    <div class="hint">
+      <b>قواعد كشف التكرار (PoC):</b>
+      <ul style="margin:6px 0 0; padding:0 18px;">
+        <li>تكرار <span class="mono">request_id</span> (الأقوى)</li>
+        <li>تكرار نفس (<span class="mono">project + vendor + amount_total</span>) خلال 14 يوم (لو تاريخ المصدر موجود)</li>
+        <li>تكرار نفس (<span class="mono">iban + amount_total</span>) مع مطالبة أخرى لسه Pending/Partial</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="layout">
+    <div class="card">
+      <h3 style="margin:0 0 8px;">إجمالي حسب المشروع</h3>
+      <div class="muted" id="totals_meta">—</div>
+      <div class="totals-list" id="totals"></div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between;">
+        <div>
+          <h3 style="margin:0 0 6px;">تفاصيل المطالبات</h3>
+          <div class="muted" id="meta">—</div>
+        </div>
+      </div>
+
+      <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>المشروع</th>
-              <th>رقم المطالبة</th>
-              <th>التاريخ</th>
-              <th>المورد</th>
-              <th>المبلغ</th>
-              <th>الحالة</th>
-              <th>مرجع التحويل</th>
               <th>مكرر؟</th>
+              <th>رقم الطلب</th>
+              <th>المشروع</th>
+              <th>المورد</th>
+              <th>بند الأعمال</th>
+              <th>بند الحسابات</th>
+              <th>البنك</th>
+              <th>IBAN</th>
+              <th>إجمالي</th>
+              <th>منصرف</th>
+              <th>متبقي</th>
+              <th>الحالة</th>
+              <th>تاريخ الطلب (المصدر)</th>
+              <th>تاريخ التعميد</th>
+              <th>تاريخ الصرف</th>
+              <th>وصف</th>
             </tr>
           </thead>
           <tbody id="rows"></tbody>
         </table>
       </div>
+
+      <div class="footer small">
+        ملاحظة: لو <span class="mono">status</span> فاضي في CSV، الصفحة بتحسبه تلقائيًا من (paid/remaining).
+      </div>
     </div>
   </div>
 
 <script>
-  // CSV parser بسيط
-  function parseCSV(text) {
-    const lines = text.trim().split(/\r?\n/);
+  // ========= Helpers =========
+  function toNumber(x){
+    if (x === null || x === undefined) return 0;
+    const s = String(x).trim();
+    if (!s) return 0;
+    // يدعم 1,234.56
+    const cleaned = s.replace(/,/g,'');
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function fmtMoney(n){
+    return (n || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
+  }
+
+  function parseDateISO(s){
+    // expects YYYY-MM-DD (لو فاضي يرجع null)
+    const t = String(s || "").trim();
+    if (!t) return null;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
+    if (!m) return null;
+    const d = new Date(Date.UTC(+m[1], +m[2]-1, +m[3]));
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  function daysBetween(a,b){
+    if (!a || !b) return Infinity;
+    const ms = Math.abs(a.getTime() - b.getTime());
+    return ms / (1000*60*60*24);
+  }
+
+  // CSV parser بسيط (PoC): لو عندك commas داخل الوصف، الأفضل نستبدل CSV parser لاحقًا.
+  function parseCSV(text){
+    const lines = text.replace(/\r/g,'').split("\n").filter(l => l.trim().length);
+    if (!lines.length) return [];
     const headers = lines[0].split(",").map(h => h.trim());
+
     return lines.slice(1).map(line => {
-      const cols = line.split(","); // PoC (لو عندك commas داخل النص استخدم CSV lib لاحقاً)
+      const cols = line.split(",");
       const obj = {};
-      headers.forEach((h,i)=> obj[h] = (cols[i] ?? "").trim());
-      obj.amount = Number(obj.amount || 0);
+      headers.forEach((h,i) => obj[h] = (cols[i] ?? "").trim());
       return obj;
     });
   }
 
+  function computeStatus(x){
+    const paid = x.amount_paid;
+    const rem  = x.amount_remaining;
+    const total = x.amount_total;
+
+    if (String(x.status || "").trim()) return x.status.trim();
+
+    // لو مش حاطط status
+    if (total === 0 && paid === 0 && rem === 0) return "Pending";
+    if (rem <= 0 && paid > 0) return "Paid";
+    if (paid > 0 && rem > 0) return "Partially Paid";
+    return "Pending";
+  }
+
+  function statusPill(status){
+    const s = status || "Pending";
+    if (s === "Paid") return `<span class="pill paid">Paid</span>`;
+    if (s === "Partially Paid") return `<span class="pill partial">Partially Paid</span>`;
+    if (s === "Canceled") return `<span class="pill dup">Canceled</span>`;
+    return `<span class="pill pending">Pending</span>`;
+  }
+
+  function normalizeRow(raw){
+    const x = {...raw};
+    x.request_id = (x.request_id || "").trim();
+    x.project = (x.project || "").trim();
+    x.vendor = (x.vendor || "").trim();
+    x.work_item = (x.work_item || "").trim();
+    x.account_item = (x.account_item || "").trim();
+    x.bank = (x.bank || "").trim();
+    x.iban = (x.iban || "").trim();
+    x.description = (x.description || "").trim();
+
+    x.amount_total = toNumber(x.amount_total);
+    x.amount_paid = toNumber(x.amount_paid);
+    x.amount_remaining = toNumber(x.amount_remaining);
+
+    x.source_request_date = (x.source_request_date || "").trim();
+    x.approval_date = (x.approval_date || "").trim();
+    x.payment_date = (x.payment_date || "").trim();
+
+    // حساب status
+    x.status = computeStatus(x);
+
+    // تواريخ كـ Date للكشف
+    x._srcDate = parseDateISO(x.source_request_date);
+    x._payDate = parseDateISO(x.payment_date);
+    return x;
+  }
+
+  // ========= Duplicate detection =========
+  function detectDuplicates(items){
+    const byRequestId = new Map();
+    const byPVA = new Map();   // project|vendor|amount_total -> array
+    const byIbanAmt = new Map(); // iban|amount_total -> array
+
+    // 1) collect
+    items.forEach((x, idx) => {
+      const rid = x.request_id || "";
+      if (rid){
+        if (!byRequestId.has(rid)) byRequestId.set(rid, []);
+        byRequestId.get(rid).push(idx);
+      }
+
+      const keyPVA = `${x.project}||${x.vendor}||${x.amount_total}`;
+      if (!byPVA.has(keyPVA)) byPVA.set(keyPVA, []);
+      byPVA.get(keyPVA).push(idx);
+
+      const keyIA = `${x.iban}||${x.amount_total}`;
+      if (!byIbanAmt.has(keyIA)) byIbanAmt.set(keyIA, []);
+      byIbanAmt.get(keyIA).push(idx);
+    });
+
+    const flags = new Array(items.length).fill(false);
+    const reasons = new Array(items.length).fill("");
+
+    // Rule A: duplicate request_id
+    for (const [rid, idxs] of byRequestId.entries()){
+      if (rid && idxs.length > 1){
+        idxs.forEach(i => {
+          flags[i] = true;
+          reasons[i] = appendReason(reasons[i], `تكرار request_id (${rid})`);
+        });
+      }
+    }
+
+    // Rule B: same project+vendor+amount within 14 days (using source_request_date if available)
+    for (const [k, idxs] of byPVA.entries()){
+      if (idxs.length <= 1) continue;
+      // compare pairwise
+      for (let a=0;a<idxs.length;a++){
+        for (let b=a+1;b<idxs.length;b++){
+          const i = idxs[a], j = idxs[b];
+          const di = items[i]._srcDate, dj = items[j]._srcDate;
+          const within = (di && dj) ? (daysBetween(di,dj) <= 14) : false;
+          // لو مفيش تواريخ مصدر، نخليها "تنبيه أضعف"؟ في PoC هنعتبرها تكرار لو مفيش تواريخ: لا.
+          if (within){
+            flags[i] = true; flags[j] = true;
+            reasons[i] = appendReason(reasons[i], "تشابه (مشروع+مورد+إجمالي) خلال 14 يوم");
+            reasons[j] = appendReason(reasons[j], "تشابه (مشروع+مورد+إجمالي) خلال 14 يوم");
+          }
+        }
+      }
+    }
+
+    // Rule C: same iban+amount_total with another item still Pending/Partial
+    for (const [k, idxs] of byIbanAmt.entries()){
+      if (idxs.length <= 1) continue;
+      const interesting = idxs.filter(i => ["Pending","Partially Paid"].includes(items[i].status));
+      if (interesting.length <= 1) continue;
+      interesting.forEach(i => {
+        flags[i] = true;
+        reasons[i] = appendReason(reasons[i], "تشابه (IBAN+إجمالي) مع مطالبات Pending/Partial");
+      });
+    }
+
+    return items.map((x, i) => ({...x, isDup: flags[i], dupReason: reasons[i]}));
+  }
+
+  function appendReason(existing, add){
+    if (!existing) return add;
+    if (existing.includes(add)) return existing;
+    return existing + " | " + add;
+  }
+
+  // ========= Rendering =========
   let data = [];
 
-  function detectDuplicates(items) {
-    // معيار تكرار بسيط: نفس (project + claim_no) أو نفس transfer_ref لو موجود
-    const seen = new Map();
-    return items.map(x => {
-      const key1 = `${x.project}__${x.claim_no}`;
-      const key2 = x.transfer_ref ? `TR__${x.transfer_ref}` : null;
-
-      const hit = (seen.has(key1)) || (key2 && seen.has(key2));
-      seen.set(key1, true);
-      if (key2) seen.set(key2, true);
-
-      return { ...x, isDup: hit };
-    });
+  function buildProjectDropdown(items){
+    const projects = Array.from(new Set(items.map(x => x.project).filter(Boolean))).sort((a,b)=>a.localeCompare(b));
+    const sel = document.getElementById("project");
+    sel.innerHTML = `<option value="">الكل</option>` + projects.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
   }
 
-  function fmt(n) {
-    return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  function escapeHtml(s){
+    return String(s ?? "")
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#039;");
   }
 
-  function render() {
-    const q = document.getElementById("q").value.toLowerCase();
-    const p = document.getElementById("project").value;
-    const s = document.getElementById("status").value;
+  function applyFilters(items){
+    const q = document.getElementById("q").value.toLowerCase().trim();
+    const p = document.getElementById("project").value.trim();
+    const s = document.getElementById("status").value.trim();
     const onlyDup = document.getElementById("onlyDup").checked;
 
-    const withDup = detectDuplicates(data);
-
-    const filtered = withDup.filter(x => {
-      const hay = `${x.project} ${x.claim_no} ${x.vendor} ${x.notes}`.toLowerCase();
-      if (q && !hay.includes(q)) return false;
+    return items.filter(x => {
       if (p && x.project !== p) return false;
       if (s && x.status !== s) return false;
       if (onlyDup && !x.isDup) return false;
+
+      if (q){
+        const hay = [
+          x.request_id, x.project, x.vendor, x.work_item, x.account_item,
+          x.bank, x.iban, x.description, x.status, x.source_request_date
+        ].join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
       return true;
     });
+  }
 
-    // totals per project
-    const totals = {};
-    filtered.forEach(x => totals[x.project] = (totals[x.project] || 0) + x.amount);
+  function computeKPIs(items){
+    const total = items.reduce((a,x)=>a + x.amount_total, 0);
+    const paid  = items.reduce((a,x)=>a + x.amount_paid, 0);
+    const rem   = items.reduce((a,x)=>a + x.amount_remaining, 0);
 
-    const totalsDiv = document.getElementById("totals");
-    totalsDiv.innerHTML = Object.keys(totals).sort().map(k => `
-      <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #eee;">
-        <div>${k}</div>
-        <b>${fmt(totals[k])}</b>
+    const count = items.length;
+    const pendingCount = items.filter(x => x.status === "Pending").length;
+    const paidCount = items.filter(x => x.status === "Paid").length;
+    const dupsCount = items.filter(x => x.isDup).length;
+
+    // قيمة "المشتبه" كإجمالي المتبقي للمكرر (عملي للكنترول)
+    const dupsRemaining = items.filter(x=>x.isDup).reduce((a,x)=>a + x.amount_remaining, 0);
+
+    return { total, paid, rem, count, pendingCount, paidCount, dupsCount, dupsRemaining };
+  }
+
+  function renderKPIs(k){
+    document.getElementById("kpi_total").textContent = fmtMoney(k.total);
+    document.getElementById("kpi_total_count").textContent = `عدد المطالبات: ${k.count}`;
+
+    document.getElementById("kpi_remaining").textContent = fmtMoney(k.rem);
+    document.getElementById("kpi_pending_count").textContent = `Pending: ${k.pendingCount}`;
+
+    document.getElementById("kpi_paid").textContent = fmtMoney(k.paid);
+    document.getElementById("kpi_paid_count").textContent = `Paid: ${k.paidCount}`;
+
+    document.getElementById("kpi_dups").textContent = fmtMoney(k.dupsRemaining);
+    document.getElementById("kpi_dups_count").textContent = `عدد المكرر: ${k.dupsCount}`;
+  }
+
+  function renderTotalsByProject(items){
+    const map = new Map();
+    items.forEach(x => {
+      const key = x.project || "(بدون مشروع)";
+      if (!map.has(key)) map.set(key, { total:0, remaining:0, paid:0, count:0, dupCount:0 });
+      const o = map.get(key);
+      o.total += x.amount_total;
+      o.remaining += x.amount_remaining;
+      o.paid += x.amount_paid;
+      o.count += 1;
+      if (x.isDup) o.dupCount += 1;
+    });
+
+    const arr = Array.from(map.entries())
+      .map(([project, v]) => ({ project, ...v }))
+      .sort((a,b)=> b.remaining - a.remaining); // الأهم للكنترول = المتبقي
+
+    document.getElementById("totals_meta").textContent =
+      `مشاريع: ${arr.length} | مرتبة حسب المتبقي (الأعلى أولاً)`;
+
+    const div = document.getElementById("totals");
+    if (!arr.length){
+      div.innerHTML = `<div class="muted">لا توجد بيانات.</div>`;
+      return;
+    }
+
+    div.innerHTML = arr.map(x => `
+      <div class="totals-item">
+        <div>
+          <div><b>${escapeHtml(x.project)}</b></div>
+          <div class="small">عدد: ${x.count} | مكرر: ${x.dupCount}</div>
+          <div class="small">منصرف: ${fmtMoney(x.paid)} | إجمالي: ${fmtMoney(x.total)}</div>
+        </div>
+        <div style="text-align:left;">
+          <div class="small">المتبقي</div>
+          <b>${fmtMoney(x.remaining)}</b>
+        </div>
       </div>
-    `).join("") || `<div class="muted">لا توجد بيانات بالفلتر الحالي.</div>`;
+    `).join("");
+  }
 
-    document.getElementById("meta").textContent =
-      `عدد المطالبات المعروضة: ${filtered.length} | إجمالي عام: ${fmt(filtered.reduce((a,b)=>a+b.amount,0))}`;
+  function renderTable(items){
+    // ترتيب: المكرر أولاً، ثم Pending/Partial، ثم التاريخ
+    const order = { "Pending": 1, "Partially Paid": 2, "Paid": 3, "Canceled": 4 };
+    const sorted = [...items].sort((a,b)=>{
+      if (a.isDup !== b.isDup) return a.isDup ? -1 : 1;
+      const oa = order[a.status] ?? 9;
+      const ob = order[b.status] ?? 9;
+      if (oa !== ob) return oa - ob;
+      const da = a._srcDate ? a._srcDate.getTime() : 0;
+      const db = b._srcDate ? b._srcDate.getTime() : 0;
+      return db - da;
+    });
 
-    const rows = document.getElementById("rows");
-    rows.innerHTML = filtered.map(x => {
-      const pillClass = x.status === "Transferred" ? "transferred" : "pending";
+    const tbody = document.getElementById("rows");
+    tbody.innerHTML = sorted.map(x => {
+      const dupCell = x.isDup
+        ? `<span class="pill dup" title="${escapeHtml(x.dupReason || '')}">مكرر</span>`
+        : `—`;
+
       return `
-        <tr>
-          <td>${x.project}</td>
-          <td>${x.claim_no}</td>
-          <td>${x.claim_date}</td>
-          <td>${x.vendor}</td>
-          <td>${fmt(x.amount)} ${x.currency || ""}</td>
-          <td><span class="pill ${pillClass}">${x.status}</span></td>
-          <td>${x.transfer_ref || "-"}</td>
-          <td>${x.isDup ? '<span class="pill dup">نعم</span>' : 'لا'}</td>
+        <tr class="${x.isDup ? "dup-row" : ""}">
+          <td>${dupCell}</td>
+          <td class="mono">${escapeHtml(x.request_id)}</td>
+          <td>${escapeHtml(x.project)}</td>
+          <td>${escapeHtml(x.vendor)}</td>
+          <td>${escapeHtml(x.work_item)}</td>
+          <td>${escapeHtml(x.account_item)}</td>
+          <td>${escapeHtml(x.bank)}</td>
+          <td class="mono">${escapeHtml(x.iban)}</td>
+          <td>${fmtMoney(x.amount_total)}</td>
+          <td>${fmtMoney(x.amount_paid)}</td>
+          <td><b>${fmtMoney(x.amount_remaining)}</b></td>
+          <td>${statusPill(x.status)}</td>
+          <td class="mono">${escapeHtml(x.source_request_date || "")}</td>
+          <td class="mono">${escapeHtml(x.approval_date || "")}</td>
+          <td class="mono">${escapeHtml(x.payment_date || "")}</td>
+          <td title="${escapeHtml(x.description || "")}">${escapeHtml(x.description || "")}</td>
         </tr>
       `;
     }).join("");
   }
 
-  async function init() {
-    const res = await fetch("./data.csv");
-    const text = await res.text();
-    data = parseCSV(text);
+  function render(){
+    const withDup = detectDuplicates(data);
+    const filtered = applyFilters(withDup);
 
-    // fill project dropdown
-    const projects = Array.from(new Set(data.map(x => x.project))).sort();
-    const sel = document.getElementById("project");
-    sel.innerHTML = `<option value="">الكل</option>` + projects.map(p => `<option>${p}</option>`).join("");
+    const kpis = computeKPIs(filtered);
+    renderKPIs(kpis);
+
+    document.getElementById("meta").textContent =
+      `المعروض: ${filtered.length} | إجمالي: ${fmtMoney(kpis.total)} | متبقي: ${fmtMoney(kpis.rem)} | منصرف: ${fmtMoney(kpis.paid)}`;
+
+    renderTotalsByProject(filtered);
+    renderTable(filtered);
+  }
+
+  // ========= Export current view =========
+  function exportCurrentCSV(){
+    const withDup = detectDuplicates(data);
+    const filtered = applyFilters(withDup);
+
+    const headers = [
+      "is_duplicate","dup_reason",
+      "request_id","project","vendor","work_item","account_item",
+      "bank","iban",
+      "amount_total","amount_paid","amount_remaining",
+      "status",
+      "source_request_date","approval_date","payment_date",
+      "description"
+    ];
+
+    const lines = [headers.join(",")];
+    filtered.forEach(x => {
+      const row = [
+        x.isDup ? "YES" : "NO",
+        safeCSV(x.dupReason || ""),
+        safeCSV(x.request_id),
+        safeCSV(x.project),
+        safeCSV(x.vendor),
+        safeCSV(x.work_item),
+        safeCSV(x.account_item),
+        safeCSV(x.bank),
+        safeCSV(x.iban),
+        x.amount_total,
+        x.amount_paid,
+        x.amount_remaining,
+        safeCSV(x.status),
+        safeCSV(x.source_request_date || ""),
+        safeCSV(x.approval_date || ""),
+        safeCSV(x.payment_date || ""),
+        safeCSV(x.description || "")
+      ];
+      lines.push(row.join(","));
+    });
+
+    const blob = new Blob([lines.join("\n")], {type:"text/csv;charset=utf-8"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "export_filtered.csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function safeCSV(value){
+    const s = String(value ?? "");
+    // لو فيه فاصلة أو سطر جديد أو اقتباس -> نحطه بين ""
+    if (/[",\n]/.test(s)){
+      return `"${s.replaceAll('"','""')}"`;
+    }
+    return s;
+  }
+
+  // ========= Init =========
+  async function init(){
+    const res = await fetch("./data.csv", { cache: "no-store" });
+    if (!res.ok){
+      alert("مش قادر أقرأ data.csv — تأكد إنه موجود جنب index.html");
+      return;
+    }
+    const text = await res.text();
+    const raw = parseCSV(text);
+    data = raw.map(normalizeRow);
+
+    buildProjectDropdown(data);
 
     ["q","project","status","onlyDup"].forEach(id => {
-      document.getElementById(id).addEventListener("input", render);
-      document.getElementById(id).addEventListener("change", render);
+      const el = document.getElementById(id);
+      el.addEventListener("input", render);
+      el.addEventListener("change", render);
     });
+
+    document.getElementById("exportBtn").addEventListener("click", exportCurrentCSV);
 
     render();
   }
