@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>لوحة المطالبات - كونترول الكاش</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Tahoma, Arial; margin: 24px; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    input, select { padding:10px; border:1px solid #ccc; border-radius:10px; }
+    .card { border:1px solid #eee; border-radius:16px; padding:16px; box-shadow:0 2px 10px rgba(0,0,0,.05); }
+    table { width:100%; border-collapse:collapse; margin-top:12px; }
+    th, td { padding:10px; border-bottom:1px solid #eee; text-align:right; }
+    th { background:#fafafa; position:sticky; top:0; }
+    .pill { padding:4px 10px; border-radius:999px; font-size:12px; display:inline-block; }
+    .pending { background:#fff7e6; }
+    .transferred { background:#e8fff0; }
+    .dup { background:#ffe8e8; }
+    .muted { color:#666; font-size:13px; }
+  </style>
+</head>
+<body>
+  <h2>لوحة المطالبات (PoC)</h2>
+  <p class="muted">عرض إجمالي المطالبات لكل مشروع + اكتشاف التكرار لمنع التحويل مرتين.</p>
+
+  <div class="row card">
+    <label>بحث: <input id="q" placeholder="اسم مشروع / رقم مطالبة / مورد..." /></label>
+    <label>مشروع: <select id="project"></select></label>
+    <label>حالة: 
+      <select id="status">
+        <option value="">الكل</option>
+        <option value="Pending">Pending</option>
+        <option value="Transferred">Transferred</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="onlyDup" /> إظهار المكرر فقط</label>
+  </div>
+
+  <div class="row" style="margin-top:16px;">
+    <div class="card" style="flex:1; min-width:260px;">
+      <h3>إجمالي حسب المشروع</h3>
+      <div id="totals"></div>
+    </div>
+
+    <div class="card" style="flex:2; min-width:320px;">
+      <h3>تفاصيل المطالبات</h3>
+      <div class="muted" id="meta"></div>
+      <div style="overflow:auto; max-height:60vh;">
+        <table>
+          <thead>
+            <tr>
+              <th>المشروع</th>
+              <th>رقم المطالبة</th>
+              <th>التاريخ</th>
+              <th>المورد</th>
+              <th>المبلغ</th>
+              <th>الحالة</th>
+              <th>مرجع التحويل</th>
+              <th>مكرر؟</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // CSV parser بسيط
+  function parseCSV(text) {
+    const lines = text.trim().split(/\r?\n/);
+    const headers = lines[0].split(",").map(h => h.trim());
+    return lines.slice(1).map(line => {
+      const cols = line.split(","); // PoC (لو عندك commas داخل النص استخدم CSV lib لاحقاً)
+      const obj = {};
+      headers.forEach((h,i)=> obj[h] = (cols[i] ?? "").trim());
+      obj.amount = Number(obj.amount || 0);
+      return obj;
+    });
+  }
+
+  let data = [];
+
+  function detectDuplicates(items) {
+    // معيار تكرار بسيط: نفس (project + claim_no) أو نفس transfer_ref لو موجود
+    const seen = new Map();
+    return items.map(x => {
+      const key1 = `${x.project}__${x.claim_no}`;
+      const key2 = x.transfer_ref ? `TR__${x.transfer_ref}` : null;
+
+      const hit = (seen.has(key1)) || (key2 && seen.has(key2));
+      seen.set(key1, true);
+      if (key2) seen.set(key2, true);
+
+      return { ...x, isDup: hit };
+    });
+  }
+
+  function fmt(n) {
+    return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  }
+
+  function render() {
+    const q = document.getElementById("q").value.toLowerCase();
+    const p = document.getElementById("project").value;
+    const s = document.getElementById("status").value;
+    const onlyDup = document.getElementById("onlyDup").checked;
+
+    const withDup = detectDuplicates(data);
+
+    const filtered = withDup.filter(x => {
+      const hay = `${x.project} ${x.claim_no} ${x.vendor} ${x.notes}`.toLowerCase();
+      if (q && !hay.includes(q)) return false;
+      if (p && x.project !== p) return false;
+      if (s && x.status !== s) return false;
+      if (onlyDup && !x.isDup) return false;
+      return true;
+    });
+
+    // totals per project
+    const totals = {};
+    filtered.forEach(x => totals[x.project] = (totals[x.project] || 0) + x.amount);
+
+    const totalsDiv = document.getElementById("totals");
+    totalsDiv.innerHTML = Object.keys(totals).sort().map(k => `
+      <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #eee;">
+        <div>${k}</div>
+        <b>${fmt(totals[k])}</b>
+      </div>
+    `).join("") || `<div class="muted">لا توجد بيانات بالفلتر الحالي.</div>`;
+
+    document.getElementById("meta").textContent =
+      `عدد المطالبات المعروضة: ${filtered.length} | إجمالي عام: ${fmt(filtered.reduce((a,b)=>a+b.amount,0))}`;
+
+    const rows = document.getElementById("rows");
+    rows.innerHTML = filtered.map(x => {
+      const pillClass = x.status === "Transferred" ? "transferred" : "pending";
+      return `
+        <tr>
+          <td>${x.project}</td>
+          <td>${x.claim_no}</td>
+          <td>${x.claim_date}</td>
+          <td>${x.vendor}</td>
+          <td>${fmt(x.amount)} ${x.currency || ""}</td>
+          <td><span class="pill ${pillClass}">${x.status}</span></td>
+          <td>${x.transfer_ref || "-"}</td>
+          <td>${x.isDup ? '<span class="pill dup">نعم</span>' : 'لا'}</td>
+        </tr>
+      `;
+    }).join("");
+  }
+
+  async function init() {
+    const res = await fetch("./data.csv");
+    const text = await res.text();
+    data = parseCSV(text);
+
+    // fill project dropdown
+    const projects = Array.from(new Set(data.map(x => x.project))).sort();
+    const sel = document.getElementById("project");
+    sel.innerHTML = `<option value="">الكل</option>` + projects.map(p => `<option>${p}</option>`).join("");
+
+    ["q","project","status","onlyDup"].forEach(id => {
+      document.getElementById(id).addEventListener("input", render);
+      document.getElementById(id).addEventListener("change", render);
+    });
+
+    render();
+  }
+
+  init();
+</script>
+</body>
+</html>
