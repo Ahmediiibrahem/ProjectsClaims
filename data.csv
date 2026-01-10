@@ -1,4 +1,4 @@
-project,claim_no,claim_date,vendor,amount,currency,status,transfer_ref,notes
-Project A,CLM-001,2026-01-02,Vendor X,150000,EGP,Pending,,First claim
-Project A,CLM-002,2026-01-04,Vendor Y,80000,EGP,Transferred,TRN-778,ok
-Project B,CLM-010,2026-01-03,Vendor Z,120000,EGP,Pending,,-
+request_id,project,vendor,work_item,account_item,bank,iban,amount_total,amount_paid,amount_remaining,status,source_request_date,approval_date,payment_date,description
+REQ-001,Project A,Contractor X,خرسانة,مقاولات,Ahly Bank,EG123,500000,0,500000,Pending,2026-01-02,2026-01-05,,"مرحلة أولى"
+REQ-002,Project A,Contractor Y,تشطيبات,مقاولات,CIB,EG456,200000,200000,0,Paid,2026-01-03,2026-01-06,2026-01-08,""
+REQ-003,Project B,Vendor Z,كهرباء,مصاريف,Banque Misr,EG789,150000,50000,100000,Partially Paid,2026-01-04,2026-01-07,,"صرف جزئي"
