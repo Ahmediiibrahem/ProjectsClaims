@@ -61,12 +61,20 @@
   <!-- Filters -->
   <div class="card" style="margin-top:12px;">
     <div class="row">
+      <label>القطاع:
+        <select id="sector"></select>
+      </label>
+
       <label>المشروع:
         <select id="project"></select>
       </label>
 
       <label>بند الحسابات:
         <select id="account_item"></select>
+      </label>
+
+      <label>الحالة:
+        <select id="status"></select>
       </label>
 
       <label>نوع التاريخ:
@@ -162,8 +170,7 @@
     return true;
   }
 
-  // CSV parser بسيط (PoC):
-  // لو في خلايا فيها commas داخل النص، خلّيها بين quotes في CSV أو هنبدّل parser لاحقاً.
+  // CSV parser بسيط (PoC)
   function parseCSV(text){
     const lines = text.replace(/\r/g,'').split("\n").filter(l => l.trim().length);
     if (!lines.length) return [];
@@ -177,10 +184,13 @@
   }
 
   // ============================================================
-  // Header mapping (يدعم هيدر إنجليزي + بدائل عربي من شيتك)
+  // Header mapping (يدعم إنجليزي + بدائل عربي)
   // ============================================================
   const headerMap = {
-    // preferred (english)
+    sector: "sector",
+    project: "project",
+    account_item: "account_item",
+    status: "status",
     request_id: "request_id",
     code: "code",
     vendor: "vendor",
@@ -188,14 +198,17 @@
     amount_paid: "amount_paid",
     amount_canceled: "amount_canceled",
     amount_remaining: "amount_remaining",
-    account_item: "account_item",
-    project: "project",
     source_request_date: "source_request_date",
     payment_request_date: "payment_request_date",
     approval_date: "approval_date",
     payment_date: "payment_date",
 
-    // arabic fallbacks (if someone exported with Arabic headers)
+    "القطاع": "sector",
+    "قطاع": "sector",
+    "المشروع": "project",
+    " المشروع": "project",
+    "بند الحسابات": "account_item",
+    "الحالة": "status",
     "رقم الطلب": "request_id",
     "الكود": "code",
     "المورد/ المقاول": "vendor",
@@ -206,15 +219,8 @@
     "ملغي": "amount_canceled",
     "الملغي": "amount_canceled",
     "المتبقي": "amount_remaining",
-    "بند الحسابات": "account_item",
-    " المشروع": "project",
-    "المشروع": "project",
-    "تاريخ الطلب\n( المصدر )": "source_request_date",
-    "تاريخ الطلب ( المصدر )": "source_request_date",
     "تاريخ الطلب (المصدر)": "source_request_date",
     "تاريخ الطلب من المشروع": "source_request_date",
-    "تاريخ الطلب\n( الصرف )": "payment_request_date",
-    "تاريخ الطلب ( الصرف )": "payment_request_date",
     "تاريخ الطلب (الصرف)": "payment_request_date",
     "تاريخ طلب الصرف": "payment_request_date",
     "تاريخ التعميد": "approval_date",
@@ -222,39 +228,41 @@
   };
 
   function normalizeRow(raw){
-    // يحوّل أي keys موجودة (إنجليزي/عربي) للمفاتيح الموحدة
     const x = {};
     for (const [k,v] of Object.entries(raw)){
-      const key = headerMap[k] || k; // لو غير معروف نسيبه زي ما هو
+      const key = headerMap[k] || k;
       x[key] = v;
     }
 
     return {
+      sector: (x.sector || "").trim(),
+      project: (x.project || "").trim(),
+      account_item: (x.account_item || "").trim(),
+      status: (x.status || "").trim(),
+
       request_id: (x.request_id || "").trim(),
       code: (x.code || "").trim(),
       vendor: (x.vendor || "").trim(),
+
       amount_total: toNumber(x.amount_total),
       amount_paid: toNumber(x.amount_paid),
       amount_canceled: toNumber(x.amount_canceled),
       amount_remaining: toNumber(x.amount_remaining),
-      account_item: (x.account_item || "").trim(),
-      project: (x.project || "").trim(),
+
       source_request_date: (x.source_request_date || "").trim(),
       payment_request_date: (x.payment_request_date || "").trim(),
       approval_date: (x.approval_date || "").trim(),
       payment_date: (x.payment_date || "").trim(),
 
-      // dates parsed for filtering
       _srcDate: parseDateISO((x.source_request_date || "").trim()),
       _payReqDate: parseDateISO((x.payment_request_date || "").trim())
     };
   }
 
   // ============================================================
-  // Duplicate detection (موجود لكن غير ظاهر في UI حالياً)
+  // Duplicate detection (hidden for now)
   // ============================================================
   function detectDuplicates(items){
-    // قواعد بسيطة للاستخدام لاحقاً (مش مستخدمة في العرض)
     const byRequestId = new Map();
     items.forEach((x, idx) => {
       const rid = x.request_id || "";
@@ -270,19 +278,52 @@
         idxs.forEach(i => flags[i] = true);
       }
     }
-
     return items.map((x,i)=> ({...x, _isDup: flags[i]}));
   }
 
   // ============================================================
-  // State + filtering
+  // State + Cascading dropdowns (Sector -> Project)
   // ============================================================
   let data = [];
+  let projectsBySector = new Map(); // sector -> Set(project)
+  let allProjects = []; // for sector=all case
 
-  function buildDropdown(id, values){
-    const sel = document.getElementById(id);
+  function setSelectOptions(selectId, values, keepValue){
+    const sel = document.getElementById(selectId);
+    const current = keepValue ? sel.value : "";
     const uniq = Array.from(new Set(values.filter(Boolean))).sort((a,b)=>a.localeCompare(b));
-    sel.innerHTML = `<option value="">الكل</option>` + uniq.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("");
+
+    sel.innerHTML =
+      `<option value="">الكل</option>` +
+      uniq.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("");
+
+    if (keepValue && current && uniq.includes(current)){
+      sel.value = current;
+    } else {
+      sel.value = "";
+    }
+  }
+
+  function rebuildProjectDropdownForSector(){
+    const sector = document.getElementById("sector").value.trim();
+    const projects = sector
+      ? Array.from(projectsBySector.get(sector) || [])
+      : allProjects;
+
+    // نحافظ على اختيار المشروع لو لسه ضمن القائمة
+    setSelectOptions("project", projects, true);
+  }
+
+  function buildGlobalDropdowns(){
+    // القطاع
+    setSelectOptions("sector", data.map(x => x.sector), false);
+
+    // بند الحسابات والحالة: global (زي ما قلت)
+    setSelectOptions("account_item", data.map(x => x.account_item), false);
+    setSelectOptions("status", data.map(x => x.status), false);
+
+    // المشاريع أول مرة: كل المشاريع
+    setSelectOptions("project", allProjects, false);
   }
 
   function getFilterDates(){
@@ -292,27 +333,28 @@
     const from = fromStr ? parseDateISO(fromStr) : null;
     const to   = toStr ? parseDateISO(toStr) : null;
 
-    // نخلي "إلى" inclusive حتى آخر اليوم (UTC)
-    // بما أننا بنستخدم Date.UTC، نضيف 1 يوم وننقص 1ms لتبقى inclusive
     let toInc = null;
     if (to){
       toInc = new Date(to.getTime() + (24*60*60*1000) - 1);
     }
-
     return { from, to: toInc };
   }
 
   function applyFilters(items){
+    const sector = document.getElementById("sector").value.trim();
     const project = document.getElementById("project").value.trim();
     const accountItem = document.getElementById("account_item").value.trim();
+    const status = document.getElementById("status").value.trim();
+
     const dateType = document.getElementById("date_type").value;
     const { from, to } = getFilterDates();
 
     return items.filter(x => {
+      if (sector && x.sector !== sector) return false;
       if (project && x.project !== project) return false;
       if (accountItem && x.account_item !== accountItem) return false;
+      if (status && x.status !== status) return false;
 
-      // date filtering
       if (from || to){
         const d = (dateType === "payment_request_date") ? x._payReqDate : x._srcDate;
         if (!dateInRange(d, from, to)) return false;
@@ -325,11 +367,7 @@
     const total = items.reduce((a,x)=>a + x.amount_total, 0);
     const paid  = items.reduce((a,x)=>a + x.amount_paid, 0);
     const rem   = items.reduce((a,x)=>a + x.amount_remaining, 0);
-
-    return {
-      total, paid, rem,
-      count: items.length
-    };
+    return { total, paid, rem, count: items.length };
   }
 
   function renderKPIs(k){
@@ -343,7 +381,6 @@
   }
 
   function renderTable(items){
-    // ترتيب بسيط: الأحدث أولاً حسب نوع التاريخ المختار (ولو فاضي يرجع للنهاية)
     const dateType = document.getElementById("date_type").value;
     const sorted = [...items].sort((a,b)=>{
       const da = (dateType === "payment_request_date") ? a._payReqDate : a._srcDate;
@@ -374,9 +411,7 @@
   }
 
   function render(){
-    // موجودة للكود (مستقبلاً)، لكن مش هنستخدمها في العرض الآن
-    const withDup = detectDuplicates(data);
-
+    const withDup = detectDuplicates(data); // hidden
     const filtered = applyFilters(withDup);
     const kpis = computeKPIs(filtered);
 
@@ -403,15 +438,19 @@
     const filtered = applyFilters(withDup);
 
     const headers = [
+      "sector","project","account_item","status",
       "request_id","code","vendor",
       "amount_total","amount_paid","amount_canceled","amount_remaining",
-      "account_item","project",
       "source_request_date","payment_request_date","approval_date","payment_date"
     ];
 
     const lines = [headers.join(",")];
     filtered.forEach(x => {
       lines.push([
+        safeCSV(x.sector),
+        safeCSV(x.project),
+        safeCSV(x.account_item),
+        safeCSV(x.status),
         safeCSV(x.request_id),
         safeCSV(x.code),
         safeCSV(x.vendor),
@@ -419,8 +458,6 @@
         x.amount_paid,
         x.amount_canceled,
         x.amount_remaining,
-        safeCSV(x.account_item),
-        safeCSV(x.project),
         safeCSV(x.source_request_date),
         safeCSV(x.payment_request_date),
         safeCSV(x.approval_date),
@@ -443,14 +480,19 @@
   // UI actions
   // ============================================================
   function clearFilters(){
-    document.getElementById("project").value = "";
+    document.getElementById("sector").value = "";
+    rebuildProjectDropdownForSector(); // resets project too
     document.getElementById("account_item").value = "";
+    document.getElementById("status").value = "";
     document.getElementById("date_type").value = "source_request_date";
     document.getElementById("date_from").value = "";
     document.getElementById("date_to").value = "";
     render();
   }
 
+  // ============================================================
+  // Init
+  // ============================================================
   async function init(){
     const res = await fetch("./data.csv", { cache: "no-store" });
     if (!res.ok){
@@ -462,10 +504,29 @@
     const raw = parseCSV(text);
     data = raw.map(normalizeRow);
 
-    buildDropdown("project", data.map(x => x.project));
-    buildDropdown("account_item", data.map(x => x.account_item));
+    // build sector->projects map
+    projectsBySector = new Map();
+    data.forEach(x => {
+      if (!x.project) return;
+      const sec = x.sector || "(بدون قطاع)";
+      if (!projectsBySector.has(sec)) projectsBySector.set(sec, new Set());
+      projectsBySector.get(sec).add(x.project);
+    });
 
-    ["project","account_item","date_type","date_from","date_to"].forEach(id => {
+    // list of all projects (unique)
+    allProjects = Array.from(new Set(data.map(x => x.project).filter(Boolean))).sort((a,b)=>a.localeCompare(b));
+
+    // build dropdowns
+    buildGlobalDropdowns();
+
+    // cascading: when sector changes -> rebuild project list
+    document.getElementById("sector").addEventListener("change", () => {
+      rebuildProjectDropdownForSector();
+      render();
+    });
+
+    // other filters
+    ["project","account_item","status","date_type","date_from","date_to"].forEach(id => {
       const el = document.getElementById(id);
       el.addEventListener("change", render);
       el.addEventListener("input", render);
