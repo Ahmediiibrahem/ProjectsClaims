@@ -127,6 +127,9 @@
     </div>
   </div>
 
+<!-- ✅ Robust CSV parser for Excel exports -->
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
 <script>
   // ============================================================
   // Helpers
@@ -154,6 +157,7 @@
   }
 
   function parseDateISO(s){
+    // expects YYYY-MM-DD; returns null if empty or invalid
     const t = String(s || "").trim();
     if (!t) return null;
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
@@ -170,17 +174,18 @@
     return true;
   }
 
-  // CSV parser بسيط (PoC)
+  // ✅ Robust CSV parser (handles quotes, commas, and newlines inside fields)
   function parseCSV(text){
-    const lines = text.replace(/\r/g,'').split("\n").filter(l => l.trim().length);
-    if (!lines.length) return [];
-    const headers = lines[0].split(",").map(h => h.trim());
-    return lines.slice(1).map(line => {
-      const cols = line.split(",");
-      const obj = {};
-      headers.forEach((h,i) => obj[h] = (cols[i] ?? "").trim());
-      return obj;
+    const result = Papa.parse(text, {
+      header: true,
+      skipEmptyLines: true,
+      dynamicTyping: false
     });
+
+    if (result.errors && result.errors.length){
+      console.warn("CSV Parse errors (first 10):", result.errors.slice(0, 10));
+    }
+    return result.data || [];
   }
 
   // ============================================================
@@ -227,23 +232,38 @@
     "تاريخ الصرف": "payment_date"
   };
 
+  function normalizeVendor(raw){
+    const vendorRaw = (raw ?? "").toString();
+
+    // remove invisible RTL marks, trim, and normalize
+    const cleaned = vendorRaw.replace(/[\u200E\u200F\u202A-\u202E]/g, "").trim();
+
+    // treat common placeholders as empty
+    if (!cleaned) return "";
+    const lower = cleaned.toLowerCase();
+    if (cleaned === "-" || cleaned === "0" || lower === "null" || lower === "none") return "";
+
+    return cleaned;
+  }
+
   function normalizeRow(raw){
+    // unify keys to our schema
     const x = {};
     for (const [k,v] of Object.entries(raw)){
       const key = headerMap[k] || k;
       x[key] = v;
     }
 
-    const vendor = (x.vendor || "").trim();
+    const vendor = normalizeVendor(x.vendor);
 
     return {
-      sector: (x.sector || "").trim(),
-      project: (x.project || "").trim(),
-      account_item: (x.account_item || "").trim(),
-      status: (x.status || "").trim(),
+      sector: String(x.sector ?? "").trim(),
+      project: String(x.project ?? "").trim(),
+      account_item: String(x.account_item ?? "").trim(),
+      status: String(x.status ?? "").trim(),
 
-      request_id: (x.request_id || "").trim(),
-      code: (x.code || "").trim(),
+      request_id: String(x.request_id ?? "").trim(),
+      code: String(x.code ?? "").trim(),
       vendor,
 
       amount_total: toNumber(x.amount_total),
@@ -251,13 +271,13 @@
       amount_canceled: toNumber(x.amount_canceled),
       amount_remaining: toNumber(x.amount_remaining),
 
-      source_request_date: (x.source_request_date || "").trim(),
-      payment_request_date: (x.payment_request_date || "").trim(),
-      approval_date: (x.approval_date || "").trim(),
-      payment_date: (x.payment_date || "").trim(),
+      source_request_date: String(x.source_request_date ?? "").trim(),
+      payment_request_date: String(x.payment_request_date ?? "").trim(),
+      approval_date: String(x.approval_date ?? "").trim(),
+      payment_date: String(x.payment_date ?? "").trim(),
 
-      _srcDate: parseDateISO((x.source_request_date || "").trim()),
-      _payReqDate: parseDateISO((x.payment_request_date || "").trim())
+      _srcDate: parseDateISO(String(x.source_request_date ?? "").trim()),
+      _payReqDate: parseDateISO(String(x.payment_request_date ?? "").trim())
     };
   }
 
@@ -317,6 +337,7 @@
 
   function buildGlobalDropdowns(){
     setSelectOptions("sector", data.map(x => x.sector), false);
+    // account_item & status: global (as requested)
     setSelectOptions("account_item", data.map(x => x.account_item), false);
     setSelectOptions("status", data.map(x => x.status), false);
     setSelectOptions("project", allProjects, false);
@@ -338,7 +359,7 @@
 
   // ============================================================
   // APPLY FILTERS
-  // **NEW RULE**: only include rows where vendor is NOT empty
+  // ✅ RULE: only include rows where vendor is NOT empty
   // ============================================================
   function applyFilters(items){
     const sector = document.getElementById("sector").value.trim();
@@ -350,7 +371,7 @@
     const { from, to } = getFilterDates();
 
     return items.filter(x => {
-      // ✅ شرط “المطالبة الفعلية”
+      // ✅ official claim rule
       if (!x.vendor) return false;
 
       if (sector && x.sector !== sector) return false;
@@ -426,7 +447,7 @@
   }
 
   // ============================================================
-  // Export (export only rows that pass the SAME filters)
+  // Export (exports only rows that pass SAME filters)
   // ============================================================
   function safeCSV(value){
     const s = String(value ?? "");
@@ -499,9 +520,11 @@
 
     const text = await res.text();
     const raw = parseCSV(text);
+
+    // normalize
     data = raw.map(normalizeRow);
 
-    // build sector->projects map (only from rows with vendor? لا، نخليه على كل الداتا عادي)
+    // build sector->projects map
     projectsBySector = new Map();
     data.forEach(x => {
       if (!x.project) return;
