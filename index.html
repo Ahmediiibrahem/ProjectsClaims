@@ -234,6 +234,8 @@
       x[key] = v;
     }
 
+    const vendor = (x.vendor || "").trim();
+
     return {
       sector: (x.sector || "").trim(),
       project: (x.project || "").trim(),
@@ -242,7 +244,7 @@
 
       request_id: (x.request_id || "").trim(),
       code: (x.code || "").trim(),
-      vendor: (x.vendor || "").trim(),
+      vendor,
 
       amount_total: toNumber(x.amount_total),
       amount_paid: toNumber(x.amount_paid),
@@ -310,19 +312,13 @@
       ? Array.from(projectsBySector.get(sector) || [])
       : allProjects;
 
-    // نحافظ على اختيار المشروع لو لسه ضمن القائمة
     setSelectOptions("project", projects, true);
   }
 
   function buildGlobalDropdowns(){
-    // القطاع
     setSelectOptions("sector", data.map(x => x.sector), false);
-
-    // بند الحسابات والحالة: global (زي ما قلت)
     setSelectOptions("account_item", data.map(x => x.account_item), false);
     setSelectOptions("status", data.map(x => x.status), false);
-
-    // المشاريع أول مرة: كل المشاريع
     setSelectOptions("project", allProjects, false);
   }
 
@@ -340,6 +336,10 @@
     return { from, to: toInc };
   }
 
+  // ============================================================
+  // APPLY FILTERS
+  // **NEW RULE**: only include rows where vendor is NOT empty
+  // ============================================================
   function applyFilters(items){
     const sector = document.getElementById("sector").value.trim();
     const project = document.getElementById("project").value.trim();
@@ -350,6 +350,9 @@
     const { from, to } = getFilterDates();
 
     return items.filter(x => {
+      // ✅ شرط “المطالبة الفعلية”
+      if (!x.vendor) return false;
+
       if (sector && x.sector !== sector) return false;
       if (project && x.project !== project) return false;
       if (accountItem && x.account_item !== accountItem) return false;
@@ -423,7 +426,7 @@
   }
 
   // ============================================================
-  // Export
+  // Export (export only rows that pass the SAME filters)
   // ============================================================
   function safeCSV(value){
     const s = String(value ?? "");
@@ -476,12 +479,9 @@
     URL.revokeObjectURL(url);
   }
 
-  // ============================================================
-  // UI actions
-  // ============================================================
   function clearFilters(){
     document.getElementById("sector").value = "";
-    rebuildProjectDropdownForSector(); // resets project too
+    rebuildProjectDropdownForSector();
     document.getElementById("account_item").value = "";
     document.getElementById("status").value = "";
     document.getElementById("date_type").value = "source_request_date";
@@ -490,9 +490,6 @@
     render();
   }
 
-  // ============================================================
-  // Init
-  // ============================================================
   async function init(){
     const res = await fetch("./data.csv", { cache: "no-store" });
     if (!res.ok){
@@ -504,7 +501,7 @@
     const raw = parseCSV(text);
     data = raw.map(normalizeRow);
 
-    // build sector->projects map
+    // build sector->projects map (only from rows with vendor? لا، نخليه على كل الداتا عادي)
     projectsBySector = new Map();
     data.forEach(x => {
       if (!x.project) return;
@@ -513,19 +510,15 @@
       projectsBySector.get(sec).add(x.project);
     });
 
-    // list of all projects (unique)
     allProjects = Array.from(new Set(data.map(x => x.project).filter(Boolean))).sort((a,b)=>a.localeCompare(b));
 
-    // build dropdowns
     buildGlobalDropdowns();
 
-    // cascading: when sector changes -> rebuild project list
     document.getElementById("sector").addEventListener("change", () => {
       rebuildProjectDropdownForSector();
       render();
     });
 
-    // other filters
     ["project","account_item","status","date_type","date_from","date_to"].forEach(id => {
       const el = document.getElementById(id);
       el.addEventListener("change", render);
